@@ -5,6 +5,7 @@ from .enrichment_agent import EnrichmentAgent
 from .summarizer_agent import SummarizerAgent
 from .visualizer_agent import VisualizerAgent
 from .pdf_agent import PDFAgent
+from .filter_agent import FilterAgent
 
 __all__ = [
     "SearchAgent",
@@ -12,4 +13,5 @@ __all__ = [
     "SummarizerAgent",
     "VisualizerAgent",
     "PDFAgent",
+    "FilterAgent",
 ]
