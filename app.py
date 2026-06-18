@@ -98,7 +98,7 @@ with st.sidebar:
         "Paper Source",
         ["Semantic Scholar", "arXiv", "OpenAlex"]
     )
-    num_results = st.slider("Number of results", 5, 25, 10)
+    num_results = st.slider("Number of results", 2, 20, 10)
     year_min = st.slider("Earliest year", 2000, 2026, 2020)
     
     st.divider()
