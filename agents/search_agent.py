@@ -117,7 +117,7 @@ Return ONLY a valid JSON array, one entry per paper, ordered best-to-worst:
     ...
 ]
 
-Every input index must appear exactly once in your output."""
+
         
         response = self._client.messages.create(
             model=self.model,
