@@ -98,15 +98,15 @@ You always respond with valid JSON only - no markdown code blocks, no extra text
                 "citationCount": p.get("citationCount"),
             })
         
-        prompt = f"""A researcher searched for: "{query}"
-
+        prompt = f"""A researcher searched for: '{query}'
+ 
 Here are the candidate papers (already fetched from an academic API):
 {json.dumps(compact, indent=2)}
-
+ 
 Rank these papers from most to least useful for this query, weighing:
 1. Relevance to the query (topical/conceptual match)
 2. Research quality/importance: citationCount, venue reputation, recency (year)
-
+ 
 Return ONLY a valid JSON array, one entry per paper, ordered best-to-worst:
 [
     {{
@@ -116,9 +116,9 @@ Return ONLY a valid JSON array, one entry per paper, ordered best-to-worst:
     }},
     ...
 ]
+ 
+Every input index must appear exactly once in your output."""
 
-
-        
         response = self._client.messages.create(
             model=self.model,
             max_tokens=1500,
