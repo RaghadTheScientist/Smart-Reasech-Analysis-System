@@ -1,7 +1,3 @@
-"""
-Visualizer Agent - Generates HTML/SVG visualizations of paper concepts using Claude.
-"""
-
 import json
 import re
 from typing import Dict
@@ -9,25 +5,15 @@ from anthropic import Anthropic
 
 
 class VisualizerAgent:
-    """Generates visual explanations of research papers."""
+    """Generates highly detailed, professional visual explanations of research papers."""
     
-    SYSTEM_PROMPT = """You are an expert at creating clear, visually appealing
-educational diagrams that explain complex research concepts.
+    SYSTEM_PROMPT = """You are a principal research engineer and expert information designer specializing in academic infographics. Your job is to translate complex scientific methodologies into dense, highly detailed, visually stunning, and self-contained HTML/SVG diagrams.
 
-You create self-contained HTML files with inline CSS and SVG that visualize:
-- Algorithm pipelines (input → processing → output)
-- System architectures (components and connections)
-- Conceptual frameworks (relationships between ideas)
-- Data flow and transformations
-- Comparative diagrams (before/after, baseline/proposed)
-
-Design principles:
-- Clean, modern aesthetic with thoughtful use of color
-- Use SVG for diagrams, HTML/CSS for layout
-- Include labels, arrows, and brief annotations
-- Make it readable at a glance
-- Use a coherent color palette (3-5 colors max)
-- Light background for accessibility
+Design Philosophy:
+- High Information Density: Avoid generic shapes. Every node should contain clear sub-steps, parameter callouts, or data-type definitions.
+- Modern Editorial Aesthetic: Use a sophisticated color palette, crisp typography, subtle CSS drop-shadows, and elegant SVG path construction.
+- Absolute Clarity: Use explicit visual hierarchies, micro-annotations, structured data tables, and unmistakable directional vectors (arrows).
+- Accessibility & Utility: Light, high-contrast clean backgrounds with pixel-perfect alignments. No broken layout bounds.
 
 You return ONLY raw HTML code - no markdown fences, no commentary."""
     
@@ -37,41 +23,47 @@ You return ONLY raw HTML code - no markdown fences, no commentary."""
     
     def generate_visual(self, summary: Dict, title: str = "") -> str:
         """
-        Generate an HTML+SVG visualization of the paper's algorithm/method.
+        Generate a highly detailed, production-grade static HTML+SVG infographic 
+        explaining the paper's full architecture, contributions, and workflows.
         """
         summary_text = json.dumps(summary, indent=2)
         
-        prompt = f"""Create an HTML visualization that explains this research paper visually.
+        prompt = f"""Create an advanced, high-density academic infographic in HTML/SVG format that thoroughly maps out this research paper.
 
 Paper Title: {title}
-
-Paper Summary:
+Paper Summary Details:
 {summary_text}
 
-Requirements:
-1. Create a SELF-CONTAINED HTML page with inline CSS and SVG
-2. Visualize the ALGORITHM/METHOD as a clear flow diagram showing:
-   - Input data/problem
-   - Each processing step or component
-   - Output/results
-3. Include a header with the paper's purpose
-4. Add a section showing key contributions as visual cards
-5. Use a modern color palette (suggest: indigo/purple/teal gradient theme)
-6. Add subtle animations (CSS only) if appropriate
-7. Make it responsive (works on mobile and desktop)
-8. Include arrows/connectors between flow steps
-9. Add brief text labels explaining each component
-10. Total height should fit in ~700px
+Strict Structural and Visual Requirements (No Interactive JS allowed):
 
-Use this structure:
-- <style> with all CSS (use CSS variables for colors)
-- <div class="container"> wrapping everything
-- Header section with title and purpose
-- SVG diagram of the algorithm
-- Contributions cards section
-- Optional: comparison or results section
+1. LAYOUT ARCHITECTURE:
+   - Self-contained HTML with comprehensive inline CSS (using structured CSS variables).
+   - Responsive flex/grid container layout wrapping an immersive multi-column or multi-section design.
+   - Fixed structural dimensions where needed to prevent overflow, but flexible enough to scale down smoothly.
 
-Return ONLY the HTML code starting with <style> or <div>. No DOCTYPE, no html/head/body tags."""
+2. DETAILED PIPELINE DIAGRAM (SVG):
+   - Do not just map "Input -> Process -> Output". Explode the method into its micro-components.
+   - For every major stage, render a distinct SVG sub-module showing inner loops, algorithmic sub-routines, data transformations, and mathematical equations/mechanisms where appropriate.
+   - Use crisp, multi-segmented SVG paths with explicitly defined marker-end markers (arrows).
+   - Use distinct geometric treatments for different concepts (e.g., solid borders for core modules, dashed borders for optional or background blocks, distinct color tones for state changes).
+
+3. HIGH-INFORMATION LABELS & ANNOTATIONS:
+   - Every processing node must have a bold header AND a 2-3 line dense technical description detailing *how* it processes data.
+   - Add micro-labels directly onto the connector lines indicating exactly what data structures, features, or tensor shapes are flowing between modules.
+
+4. ACADEMIC CONTRIBUTION CARDS:
+   - Create a dedicated section with structured grid cards detailing key contributions.
+   - Each card must feature a distinct visual badge/icon, an explicit statement of the novelty, and the technical impact or problem it solves over traditional baselines.
+
+5. PERFORMANCE & METRICS BENCHMARK BLOCK:
+   - Include a dedicated comparative visualization section (e.g., an SVG structured data table, detailed horizontal progress meters, or a relative scatter layout) that contrasts this paper's accuracy, efficiency, latency, or memory consumption against baseline models.
+
+6. COLOR PALETTE & AESTHETICS:
+   - Theme: Executive Deep Indigo, Slate, Teal, and subtle Magenta accents for critical paths.
+   - Background: Light gray/white (#f8fafc) for maximum legibility.
+   - Shadows & Radii: Clean, subtle box-shadows and 8px border-radii for modern card containers.
+
+Return ONLY the HTML code starting with <style> or <div>. Do not include markdown code fences, DOCTYPE, html, head, or body tags."""
         
         response = self.client.messages.create(
             model=self.model,
@@ -81,64 +73,64 @@ Return ONLY the HTML code starting with <style> or <div>. No DOCTYPE, no html/he
         )
         
         html = response.content[0].text.strip()
-        
-        # Remove any markdown code fences
         html = re.sub(r"^```(?:html)?\s*", "", html)
-        html = re.sub(r"\s*```$", "", html)
+        html = re.sub(r"\s*
+```$", "", html)
         
-        # Wrap in a basic structure if not already wrapped
         if not html.startswith("<style>") and not html.startswith("<div"):
             html = f"<div>{html}</div>"
         
         return html
     
     def generate_algorithm_diagram(self, algorithm_description: str) -> str:
-        """Generate a focused SVG diagram of just the algorithm."""
-        prompt = f"""Create an SVG diagram visualizing this algorithm:
+        """Generate a dense, granular, static SVG flow diagram detailing an algorithm's lifecycle."""
+        prompt = f"""Create an exhaustive, high-fidelity static SVG schematic visualizing this algorithm's logic, branch-points, and data processing flow:
 
 {algorithm_description}
 
-Requirements:
-- Pure SVG (no HTML wrapper, no CSS variables needed - use direct colors)
-- Width: 800, Height: 500
-- Show inputs on the left, outputs on the right
-- Use rounded rectangles for processes
-- Use arrows to show data flow
-- Use colors: #6366f1 (primary), #8b5cf6 (secondary), #14b8a6 (accent), #f3f4f6 (background)
-- Include text labels on each node
-- Modern, clean design
+Strict Specifications:
+- Pure SVG code only. Width: 1000, Height: 750 (expanded canvas size for fine grain details).
+- Multi-Layer Topology: Map out specific internal data mutations, matrix/tensor transformations, loss calculations, or decision branch-trees.
+- Flow Geometry: Use precise, curved or right-angled orthogonal lines. Connectors must use explicit marker-ends and must never overlap confusingly.
+- Visual Hierarchy:
+    * Inputs / Initialization on the left (light slate blue).
+    * Main Processing Core / Iteration blocks in the center (deep indigo and royal violet accents).
+    * Outputs / Evaluations on the right (vibrant teal).
+    * Conditional logic / Edge-cases explicitly isolated via distinct diamonds or dashed-line subsystems.
+- Node Micro-text: Every structural node must display an upper title and small inner bullet-point annotations detailing its formulas, variables, or execution constraints.
+- No interactivity. Rely purely on clean, production-grade typography and color-coding.
 
 Return ONLY the SVG code starting with <svg>."""
         
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=3000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
         
         svg = response.content[0].text.strip()
         svg = re.sub(r"^```(?:svg|xml|html)?\s*", "", svg)
-        svg = re.sub(r"\s*```$", "", svg)
+        svg = re.sub(r"\s*
+```$", "", svg)
         
         return svg
     
     def generate_comparison_chart(self, papers_data: list) -> str:
-        """Generate a comparison visualization between multiple papers."""
+        """Generate a feature-dense static comparison dashboard across multiple papers."""
         data_text = json.dumps(papers_data, indent=2)
         
-        prompt = f"""Create an HTML+SVG visualization comparing these papers:
+        prompt = f"""Create a highly detailed, publication-ready academic comparison matrix in HTML/CSS format comparing the following papers:
 
 {data_text}
 
 Requirements:
-- Self-contained HTML with inline CSS
-- Side-by-side comparison cards
-- Highlight similarities and differences
-- Use a clean grid layout
-- Color-code each paper distinctly
-- Total height ~600px
+- Comprehensive Layout: Implement a structured grid comparison table alongside distinct structural card profiles for each paper.
+- Deep Metric Mapping: Compare the papers across explicitly stated technical pillars: Core Methodology, Computation/Time Complexity, Hardware Requirements, Data Limitations, and Main Advantages.
+- Explicit Qualitative Indicators: Use static, beautifully designed CSS tags/pill-labels (e.g., "High Throughput", "O(N log N)", "GPU Intensive", "Theoretical Bounds") rather than vague summaries.
+- Color Architecture: Assign a unique, sophisticated accent color profile to each paper to easily trace individual approaches across the comparison view.
+- Maximize readability and data density. The output should look like a professional benchmark chart found in top-tier review papers.
 
-Return ONLY raw HTML code."""
+Return ONLY raw HTML code without markdown wrappers."""
         
         response = self.client.messages.create(
             model=self.model,
