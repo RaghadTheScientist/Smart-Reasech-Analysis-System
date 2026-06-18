@@ -13,6 +13,7 @@ from agents.pdf_agent import PDFAgent
 from agents.filter_agent import FilterAgent
 import concurrent.futures
 import time
+import re
 
 # ─────────────────────────────────────────────────────────────
 # Page Configuration
