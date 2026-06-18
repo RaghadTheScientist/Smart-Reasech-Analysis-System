@@ -10,6 +10,7 @@ from agents.enrichment_agent import EnrichmentAgent
 from agents.summarizer_agent import SummarizerAgent
 from agents.visualizer_agent import VisualizerAgent
 from agents.pdf_agent import PDFAgent
+from agents.filter_agent import FilterAgent
 import concurrent.futures
 import time
 
@@ -118,9 +119,16 @@ with st.sidebar:
         help="Slower but more detailed analysis"
     )
     parallel_analysis = st.checkbox(
-        "Run agents in parallel",
+        "Run papers in parallel",
         value=True,
-        help="Faster analysis using concurrent agents"
+        help="Analyze multiple selected papers concurrently. Faster but uses "
+             "more API capacity at once."
+    )
+    use_filter = st.checkbox(
+        "🛡️ Validate claims against source (recommended)",
+        value=True,
+        help="Filters out exaggerated, unsupported, or too-absolute claims "
+             "from the summary before visualizing. Catches LLM over-claiming."
     )
     
     st.divider()
@@ -345,13 +353,14 @@ if st.session_state.selected_papers:
         if st.button("🚀 Analyze All Selected Papers", type="primary"):
             summarizer = SummarizerAgent(api_key=api_key)
             visualizer = VisualizerAgent(api_key=api_key)
+            filter_agent = FilterAgent(api_key=api_key) if use_filter else None
             pdf_agent = PDFAgent() if use_full_pdf else None
             
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             def analyze_paper(paper):
-                """Analyze a single paper with summary + visualization."""
+                """Analyze a single paper: summary → filter → visualization."""
                 paper_id = paper.get("paperId") or paper.get("id")
                 title = paper.get("title", "Untitled")
                 
@@ -369,32 +378,65 @@ if st.session_state.selected_papers:
                     return paper_id, {"error": "No content available"}
                 
                 try:
-                    # Run summary and viz
-                    if parallel_analysis:
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                            summary_future = executor.submit(summarizer.summarize, content, title)
-                            summary = summary_future.result()
-                            viz_future = executor.submit(visualizer.generate_visual, summary, title)
-                            visualization = viz_future.result()
-                    else:
-                        summary = summarizer.summarize(content, title)
-                        visualization = visualizer.generate_visual(summary, title)
+                    # Step 1: Summarize (always sequential — filter & viz depend on it)
+                    summary = summarizer.summarize(content, title)
+                    
+                    # Step 2: Validate claims against source (optional)
+                    excluded = []
+                    filter_meta = {"overall_confidence": "not_checked", "notes": ""}
+                    if filter_agent:
+                        summary, excluded, filter_meta = filter_agent.validate(
+                            summary=summary,
+                            paper_content=content,
+                            title=title,
+                        )
+                    
+                    # Step 3: Visualize the (now validated) summary
+                    visualization = visualizer.generate_visual(summary, title)
                     
                     return paper_id, {
                         "summary": summary,
                         "visualization": visualization,
-                        "title": title
+                        "title": title,
+                        "excluded_findings": excluded,
+                        "filter_meta": filter_meta,
                     }
                 except Exception as e:
                     return paper_id, {"error": str(e)}
             
-            # Process papers
+            # Process papers (parallel across papers, sequential within each)
             total = len(st.session_state.selected_papers)
-            for i, paper in enumerate(st.session_state.selected_papers):
-                status_text.text(f"Analyzing paper {i+1}/{total}: {paper.get('title', '')[:60]}...")
-                pid, result = analyze_paper(paper)
-                st.session_state.analyses[pid] = result
-                progress_bar.progress((i + 1) / total)
+            completed = 0
+            
+            if parallel_analysis and total > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(total, 4)) as executor:
+                    future_to_paper = {
+                        executor.submit(analyze_paper, paper): paper
+                        for paper in st.session_state.selected_papers
+                    }
+                    for future in concurrent.futures.as_completed(future_to_paper):
+                        paper = future_to_paper[future]
+                        completed += 1
+                        status_text.text(
+                            f"Analyzing {completed}/{total}: "
+                            f"{paper.get('title', '')[:60]}..."
+                        )
+                        try:
+                            pid, result = future.result()
+                            st.session_state.analyses[pid] = result
+                        except Exception as e:
+                            pid = paper.get("paperId") or paper.get("id")
+                            st.session_state.analyses[pid] = {"error": str(e)}
+                        progress_bar.progress(completed / total)
+            else:
+                for i, paper in enumerate(st.session_state.selected_papers):
+                    status_text.text(
+                        f"Analyzing paper {i+1}/{total}: "
+                        f"{paper.get('title', '')[:60]}..."
+                    )
+                    pid, result = analyze_paper(paper)
+                    st.session_state.analyses[pid] = result
+                    progress_bar.progress((i + 1) / total)
             
             status_text.text("✅ Analysis complete!")
             time.sleep(1)
@@ -423,8 +465,44 @@ if st.session_state.analyses:
         
         summary = analysis.get("summary", {})
         visualization = analysis.get("visualization", "")
+        excluded = analysis.get("excluded_findings", [])
+        filter_meta = analysis.get("filter_meta", {})
         
-        tab_viz, tab_summary, tab_raw = st.tabs(["🎨 Visualization", "📝 Summary", "🔍 Raw Data"])
+        # Confidence + filter status badge
+        confidence = filter_meta.get("overall_confidence", "not_checked")
+        if confidence == "high":
+            badge_color, badge_label = "#10b981", "✅ High confidence"
+        elif confidence == "medium":
+            badge_color, badge_label = "#f59e0b", "⚠️ Medium confidence"
+        elif confidence == "low":
+            badge_color, badge_label = "#ef4444", "🚨 Low confidence"
+        else:
+            badge_color, badge_label = "#6b7280", "🛡️ Not validated"
+        
+        n_excluded = len(excluded)
+        excluded_text = f" • {n_excluded} claim{'s' if n_excluded != 1 else ''} filtered" if n_excluded else ""
+        
+        st.markdown(
+            f"<div style='display:inline-block;background:{badge_color};color:white;"
+            f"padding:6px 14px;border-radius:20px;font-size:0.9em;font-weight:600;"
+            f"margin-bottom:10px;'>{badge_label}{excluded_text}</div>",
+            unsafe_allow_html=True
+        )
+        
+        if filter_meta.get("notes"):
+            st.caption(f"💬 {filter_meta['notes']}")
+        
+        # Tabs (add Filtered Claims if filter ran)
+        if n_excluded > 0 or confidence != "not_checked":
+            tab_viz, tab_summary, tab_filter, tab_raw = st.tabs(
+                ["🎨 Visualization", "📝 Summary",
+                 f"🛡️ Filtered Claims ({n_excluded})", "🔍 Raw Data"]
+            )
+        else:
+            tab_viz, tab_summary, tab_raw = st.tabs(
+                ["🎨 Visualization", "📝 Summary", "🔍 Raw Data"]
+            )
+            tab_filter = None
         
         with tab_summary:
             col_left, col_right = st.columns(2)
@@ -485,6 +563,69 @@ if st.session_state.analyses:
         
         with tab_raw:
             st.json(summary)
+        
+        # Filtered Claims tab content (if filter ran)
+        if tab_filter is not None:
+            with tab_filter:
+                if n_excluded == 0:
+                    st.success(
+                        "✅ All claims in the summary were supported by the "
+                        "source paper. Nothing was filtered."
+                    )
+                else:
+                    st.markdown(
+                        f"The validator flagged **{n_excluded}** claim"
+                        f"{'s' if n_excluded != 1 else ''} as exaggerated, "
+                        f"unsupported, or too absolute. These were "
+                        f"removed or rewritten before the visualization was generated."
+                    )
+                    
+                    # Group by category
+                    by_category = {}
+                    for item in excluded:
+                        cat = item.get("category", "other")
+                        by_category.setdefault(cat, []).append(item)
+                    
+                    category_styles = {
+                        "exaggerated": ("⚠️", "#f59e0b", "Exaggerated"),
+                        "unsupported": ("🚨", "#ef4444", "Unsupported"),
+                        "too_absolute": ("📐", "#8b5cf6", "Too Absolute"),
+                        "other": ("ℹ️", "#6b7280", "Other"),
+                    }
+                    
+                    for cat, items in by_category.items():
+                        icon, color, label = category_styles.get(cat, category_styles["other"])
+                        st.markdown(
+                            f"<h4 style='color:{color};margin-top:20px;'>"
+                            f"{icon} {label} ({len(items)})</h4>",
+                            unsafe_allow_html=True
+                        )
+                        
+                        for item in items:
+                            action = item.get("action", "removed")
+                            field = item.get("field", "—")
+                            original = item.get("original_claim", "")
+                            reason = item.get("reason", "")
+                            rewritten = item.get("rewritten_as")
+                            
+                            action_icon = "✂️ Removed" if action == "removed" else "✏️ Rewritten"
+                            
+                            st.markdown(
+                                f"<div style='background:#f9fafb;border-left:4px solid {color};"
+                                f"padding:12px 16px;margin:8px 0;border-radius:6px;'>"
+                                f"<div style='font-size:0.85em;color:#6b7280;margin-bottom:6px;'>"
+                                f"<b>{action_icon}</b> • from <code>{field}</code></div>"
+                                f"<div style='margin-bottom:8px;'><b>Original:</b> "
+                                f"<span style='text-decoration:line-through;color:#9ca3af;'>"
+                                f"{original}</span></div>"
+                                + (f"<div style='margin-bottom:8px;'><b>Rewritten as:</b> "
+                                   f"<span style='color:#10b981;'>{rewritten}</span></div>"
+                                   if action == "rewritten" and rewritten else "")
+                                + f"<div style='color:#4b5563;font-style:italic;'>"
+                                f"💭 {reason}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
 
 # ─────────────────────────────────────────────────────────────
 # Footer
