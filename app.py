@@ -100,8 +100,8 @@ with st.sidebar:
         "Paper Source",
         ["Semantic Scholar", "arXiv", "OpenAlex"]
     )
-    num_results = st.slider("Number of results", 5, 25, 10)
-    year_min = st.slider("Earliest year", 2000, 2026, 2020)
+    num_results = st.slider("Number of results", 2, 10, 2)
+    year_min = st.slider("Earliest year", 2000, 2026, 2024)
     
     use_llm_ranking = st.checkbox(
         "🤖 Re-rank results with Claude",
@@ -314,8 +314,7 @@ if st.session_state.papers:
                         st.markdown(f"""
                         <div class='author-card'>
                             <b>{name}</b><br>
-                            <small>📍 {affil_str}</small><br>
-                            <small>🏆 h-index: {h_idx} | Rank: {rank}</small>
+                            <small>🏆 h-index: {h_idx}</small>
                         </div>
                         """, unsafe_allow_html=True)
                     else:
