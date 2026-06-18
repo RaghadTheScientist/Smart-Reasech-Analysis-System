@@ -1,12 +1,16 @@
 """
 Search Agent - Fetches papers from multiple sources.
 Supports: Semantic Scholar, arXiv, OpenAlex
+Optionally re-ranks results using Claude as an LLM ranker.
 """
 
+import json
+import re
 import requests
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Optional
 import time
+from anthropic import Anthropic
 
 
 class SearchAgent:
@@ -16,12 +20,24 @@ class SearchAgent:
     ARXIV_BASE = "http://export.arxiv.org/api/query"
     OPENALEX_BASE = "https://api.openalex.org"
     
-    def __init__(self, source: str = "semantic_scholar"):
+    RANKING_SYSTEM_PROMPT = """You are an expert research librarian who ranks academic
+papers by how well they serve a researcher's query. You judge papers on:
+1. Relevance to the stated query (topical and conceptual match, not just keyword overlap)
+2. Research quality/importance signals (citation count, venue reputation, recency)
+
+You never invent facts about a paper that aren't present in the data given to you.
+You always respond with valid JSON only - no markdown code blocks, no extra text."""
+    
+    def __init__(self, source: str = "semantic_scholar", api_key: Optional[str] = None,
+                 model: str = "claude-sonnet-4-6"):
         self.source = source
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "ResearchAgent/1.0 (research-assistant)"
         })
+        # Used only for rank_results(); search() itself never calls the LLM.
+        self.model = model
+        self._client = Anthropic(api_key=api_key) if api_key else None
     
     def search(self, query: str, limit: int = 10, year_min: int = 2000) -> List[Dict]:
         """Main search entry point. Routes to appropriate source."""
@@ -33,6 +49,118 @@ class SearchAgent:
             return self._search_openalex(query, limit, year_min)
         else:
             raise ValueError(f"Unknown source: {self.source}")
+    
+    def rank_results(self, query: str, papers: List[Dict]) -> List[Dict]:
+        """
+        Re-rank already-fetched papers using Claude as an LLM ranker.
+        
+        The LLM ONLY decides ordering (and gives a short reason per paper) -
+        it never rewrites, summarizes, or invents paper content. Each paper
+        dict returned is the exact same object that came back from the
+        source API, just reordered, with two extra keys added:
+        "rank_score" (1-10) and "rank_reason" (short justification).
+        
+        Ranking considers:
+          - relevance to `query` (topical/conceptual match)
+          - research quality/importance signals: citationCount, venue, year (recency)
+        
+        Args:
+            query: the original search query, used as the relevance anchor
+            papers: list of paper dicts as returned by search()
+        
+        Returns:
+            The same paper dicts, reordered best-to-worst, each augmented
+            with "rank_score" and "rank_reason". Falls back to the original
+            (unranked) order if no API key was configured or the LLM call
+            fails for any reason.
+        """
+        if not papers:
+            return papers
+        
+        if self._client is None:
+            raise RuntimeError(
+                "rank_results() requires an api_key to be passed to SearchAgent(...)."
+            )
+        
+        # Build a lightweight, LLM-facing view of each paper (id + the
+        # signals the ranker should weigh). Keeps token usage down and
+        # keeps the LLM from trying to "use" fields like full abstracts
+        # as anything other than relevance signal.
+        compact = []
+        for i, p in enumerate(papers):
+            compact.append({
+                "index": i,
+                "paperId": p.get("paperId"),
+                "title": p.get("title"),
+                "abstract": (p.get("abstract") or "")[:600],
+                "year": p.get("year"),
+                "venue": p.get("venue"),
+                "citationCount": p.get("citationCount"),
+            })
+        
+        prompt = f"""A researcher searched for: "{query}"
+
+Here are the candidate papers (already fetched from an academic API):
+{json.dumps(compact, indent=2)}
+
+Rank these papers from most to least useful for this query, weighing:
+1. Relevance to the query (topical/conceptual match)
+2. Research quality/importance: citationCount, venue reputation, recency (year)
+
+Return ONLY a valid JSON array, one entry per paper, ordered best-to-worst:
+[
+    {{
+        "index": <original index from the input>,
+        "rank_score": <integer 1-10, 10 = best>,
+        "rank_reason": "<one short sentence justifying the rank>"
+    }},
+    ...
+]
+
+Every input index must appear exactly once in your output."""
+        
+        response = self._client.messages.create(
+            model=self.model,
+            max_tokens=1500,
+            system=self.RANKING_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        text = response.content[0].text.strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        
+        try:
+            ranking = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\[.*\]", text, re.DOTALL)
+            if not match:
+                raise ValueError(f"Could not parse ranking as JSON: {text[:200]}")
+            ranking = json.loads(match.group())
+        
+        ranked_papers = []
+        seen_indices = set()
+        for entry in ranking:
+            idx = entry.get("index")
+            if idx is None or idx in seen_indices or not (0 <= idx < len(papers)):
+                continue
+            seen_indices.add(idx)
+            # Original paper data is untouched - only annotated with rank info.
+            paper = dict(papers[idx])
+            paper["rank_score"] = entry.get("rank_score")
+            paper["rank_reason"] = entry.get("rank_reason")
+            ranked_papers.append(paper)
+        
+        # Safety net: include any papers the LLM omitted, at the end,
+        # so rank_results() never silently drops a result.
+        for i, p in enumerate(papers):
+            if i not in seen_indices:
+                paper = dict(p)
+                paper["rank_score"] = None
+                paper["rank_reason"] = "Not ranked by LLM (omitted from response)"
+                ranked_papers.append(paper)
+        
+        return ranked_papers
     
     def _search_semantic_scholar(self, query: str, limit: int, year_min: int) -> List[Dict]:
         """Search Semantic Scholar API."""
@@ -52,7 +180,7 @@ class SearchAgent:
             return data.get("data", [])
         except requests.exceptions.RequestException as e:
             # Retry with reduced fields if rate limited
-            if response.status_code == 429:
+            if getattr(e.response, "status_code", None) == 429:
                 time.sleep(2)
                 return self._search_semantic_scholar(query, limit, year_min)
             raise Exception(f"Semantic Scholar error: {e}")
