@@ -160,7 +160,25 @@ with col1:
 with col2:
     search_clicked = st.button("🔍 Search", use_container_width=True, type="primary")
 
-if search_clicked and query:
+def validate_query(q):
+    """Returns (is_valid, error_message) for a raw search query string."""
+    if q is None or not q.strip():
+        return False, "Please enter a search query before searching."
+    q = q.strip()
+    if len(q) < 3:
+        return False, "Search query is too short (minimum 3 characters)."
+    if len(q) > 300:
+        return False, "Search query is too long (maximum 300 characters)."
+    if not re.search(r"[A-Za-z0-9]", q):
+        return False, "Search query must contain at least one letter or number."
+    return True, ""
+ 
+if search_clicked:
+    is_valid, error_message = validate_query(query)
+    if not is_valid:
+        st.error(error_message)
+ 
+if search_clicked and query and validate_query(query)[0]:
     with st.spinner(f"Searching {search_source} for '{query}'..."):
         try:
             search_agent = SearchAgent(
@@ -172,6 +190,7 @@ if search_clicked and query:
                 limit=num_results,
                 year_min=year_min
             )
+
             
             # Optional LLM re-ranking
             if use_llm_ranking and papers:
