@@ -98,7 +98,7 @@ with st.sidebar:
         "Paper Source",
         ["Semantic Scholar", "arXiv", "OpenAlex"]
     )
-    num_results = st.slider("Number of results", 2, 20, 10)
+    num_results = st.slider("Number of results", 5, 25, 10)
     year_min = st.slider("Earliest year", 2000, 2026, 2020)
     
     st.divider()
@@ -341,7 +341,7 @@ if st.session_state.analyses:
         summary = analysis.get("summary", {})
         visualization = analysis.get("visualization", "")
         
-        tab_summary, tab_viz, tab_raw = st.tabs(["📝 Summary", "🎨 Visualization", "🔍 Raw Data"])
+        tab_viz, tab_summary, tab_raw = st.tabs(["🎨 Visualization", "📝 Summary", "🔍 Raw Data"])
         
         with tab_summary:
             col_left, col_right = st.columns(2)
@@ -373,10 +373,30 @@ if st.session_state.analyses:
         
         with tab_viz:
             if visualization:
-                components.html(visualization, height=700, scrolling=True)
+                components.html(visualization, height=2400, scrolling=True)
                 
-                with st.expander("View HTML source"):
+                with st.expander("📄 View HTML source"):
                     st.code(visualization, language="html")
+                
+                # Concept deep-dive feature
+                key_terms = summary.get("key_terms", [])
+                if key_terms:
+                    st.divider()
+                    st.markdown("### 🔍 Deep Dive into Core Concepts")
+                    st.caption("Click any concept to get a detailed visual explanation")
+                    
+                    cols = st.columns(min(len(key_terms), 5))
+                    for i, term in enumerate(key_terms[:5]):
+                        with cols[i]:
+                            if st.button(f"📖 {term}", key=f"concept_{pid}_{i}"):
+                                with st.spinner(f"Generating deep-dive for '{term}'..."):
+                                    deep_dive = VisualizerAgent(api_key=api_key).generate_concept_deep_dive(summary, term)
+                                    st.session_state[f"deepdive_{pid}_{i}"] = deep_dive
+                            
+                            # Show deep-dive if generated
+                            if f"deepdive_{pid}_{i}" in st.session_state:
+                                with st.expander(f"Deep dive: {term}", expanded=True):
+                                    components.html(st.session_state[f"deepdive_{pid}_{i}"], height=1400, scrolling=True)
             else:
                 st.info("No visualization generated.")
         
