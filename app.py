@@ -71,6 +71,7 @@ def init_state():
         "analyses": {},
         "search_done": False,
         "enriched_authors": {},
+        "search_query": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -100,6 +101,13 @@ with st.sidebar:
     )
     num_results = st.slider("Number of results", 5, 25, 10)
     year_min = st.slider("Earliest year", 2000, 2026, 2020)
+    
+    use_llm_ranking = st.checkbox(
+        "🤖 Re-rank results with Claude",
+        value=False,
+        help="Uses Claude to re-order results by relevance + quality. "
+             "Requires API key. Adds ~2-5s per search."
+    )
     
     st.divider()
     
@@ -146,19 +154,62 @@ with col2:
 if search_clicked and query:
     with st.spinner(f"Searching {search_source} for '{query}'..."):
         try:
-            search_agent = SearchAgent(source=search_source.lower().replace(" ", "_"))
+            search_agent = SearchAgent(
+                source=search_source.lower().replace(" ", "_"),
+                api_key=api_key if use_llm_ranking else None,
+            )
             papers = search_agent.search(
                 query=query,
                 limit=num_results,
                 year_min=year_min
             )
+            
+            # Optional LLM re-ranking
+            if use_llm_ranking and papers:
+                if not api_key:
+                    st.warning("⚠️ LLM ranking requires an API key. Showing unranked results.")
+                else:
+                    with st.spinner("🤖 Re-ranking results with Claude..."):
+                        try:
+                            papers = search_agent.rank_results(query=query, papers=papers)
+                        except Exception as rank_err:
+                            st.warning(f"Ranking failed, showing original order: {rank_err}")
+            
             st.session_state.papers = papers
+            st.session_state.search_query = query  # remember for re-rank button
             st.session_state.search_done = True
             st.session_state.selected_papers = []
             st.session_state.analyses = {}
             st.success(f"Found {len(papers)} papers")
         except Exception as e:
             st.error(f"Search failed: {str(e)}")
+
+# Re-rank button (works on already-fetched results without re-searching)
+if st.session_state.papers and api_key:
+    col_rank1, col_rank2 = st.columns([1, 4])
+    with col_rank1:
+        rerank_clicked = st.button("🤖 Re-rank with AI", use_container_width=True)
+    with col_rank2:
+        # Show if results are already ranked
+        if st.session_state.papers and st.session_state.papers[0].get("rank_score") is not None:
+            st.caption("✅ Results ranked by Claude")
+    
+    if rerank_clicked:
+        with st.spinner("Re-ranking with Claude..."):
+            try:
+                search_agent = SearchAgent(
+                    source=search_source.lower().replace(" ", "_"),
+                    api_key=api_key,
+                )
+                ranked = search_agent.rank_results(
+                    query=st.session_state.get("search_query", query),
+                    papers=st.session_state.papers,
+                )
+                st.session_state.papers = ranked
+                st.success("✅ Results re-ranked")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Re-ranking failed: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # Step 2: Display Papers with Enrichment
@@ -173,7 +224,39 @@ if st.session_state.papers:
         paper_id = paper.get("paperId") or paper.get("id") or str(idx)
         
         with st.container():
+            # Show rank info prominently if ranked
+            rank_score = paper.get("rank_score")
+            rank_reason = paper.get("rank_reason")
+            
+            if rank_score is not None:
+                # Color-code the rank: green 8-10, amber 5-7, gray <5
+                if rank_score >= 8:
+                    rank_color = "#10b981"
+                elif rank_score >= 5:
+                    rank_color = "#f59e0b"
+                else:
+                    rank_color = "#6b7280"
+                
+                st.markdown(
+                    f"""<div style='display:flex;align-items:center;gap:12px;margin-bottom:8px;'>
+                        <span style='background:{rank_color};color:white;font-weight:700;
+                                     padding:6px 14px;border-radius:20px;font-size:0.9em;'>
+                            #{idx + 1} • Score {rank_score}/10
+                        </span>
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+            
             st.markdown(f"### {paper.get('title', 'Untitled')}")
+            
+            # Show rank reason as italic caption
+            if rank_reason:
+                st.markdown(
+                    f"<div style='background:#f3f4f6;border-left:3px solid #6366f1;"
+                    f"padding:8px 12px;margin:8px 0;font-size:0.9em;color:#4b5563;"
+                    f"font-style:italic;border-radius:4px;'>💭 {rank_reason}</div>",
+                    unsafe_allow_html=True
+                )
             
             # Metrics row
             metrics_html = "<div>"
